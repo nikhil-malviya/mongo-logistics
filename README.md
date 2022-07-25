@@ -30,7 +30,7 @@ Open a browser and enter the URL [http://localhost:5000](http://localhost:5000) 
 Create a new collection `cities` using the following aggregation on `worldcities` collection
 
 
-```json
+```
 [{
  $match: {
   population: {
@@ -97,7 +97,7 @@ Create a new collection `cities` using the following aggregation on `worldcities
 
 Create a new collection `planes` using the following aggregation on `cities` collection
 
-```json
+```
 [{
  $sample: {
   size: 200
@@ -162,4 +162,4 @@ db.cargos.createIndex({status:1,location:1})
 -	Aggregations include previousLanded field populated while creating `planes` collection to save computations.
 
 ## Future Work
-- There are many ways to improve the application. For example the nearby cities can be pre-computed and stored in the database. Old data can be archived and frequently accessed data can be served via inmemory storage engine
+- There are many ways to improve the application. For example the nearby cities can be pre-computed and stored in the database. Old data can be archived and frequently accessed data can be served via inmemory storage engine.
