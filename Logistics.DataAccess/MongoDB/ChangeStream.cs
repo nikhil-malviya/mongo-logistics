@@ -26,14 +26,13 @@ public static class ChangeStream
 			var options = new ChangeStreamOptions { FullDocument = ChangeStreamFullDocumentOption.UpdateLookup, };
 			var pipeline = new EmptyPipelineDefinition<ChangeStreamDocument<BsonDocument>>()
 											.Match(
-												x => x.OperationType == ChangeStreamOperationType.Update
-												&& x.UpdateDescription.UpdatedFields.Contains(Plane.Landed)
+												"{ operationType: { $in: [ 'update'] }, 'updateDescription.updatedFields.landed' : { $exists: true } }"
 											);
 
 
 			using (var cursor = await planesCollection.WatchAsync(pipeline, options))
 			{
-				await cursor.ForEachAsync(async change =>
+				await cursor.ForEachAsync(change =>
 				{
 					var plane = new PlaneDocument(change.FullDocument);
 
@@ -45,9 +44,9 @@ public static class ChangeStream
 						var travelledCitiesNames = new string[] { departedCity, landedCity };
 						var filter = Builders<BsonDocument>.Filter.In(City.Id, travelledCitiesNames);
 
-						var travelledCities = await Query.FindAsync(citiesCollection, filter).ConfigureAwait(false);
+						var travelledCities = citiesCollection.Find(filter).ToList();
 
-						UpdateDoc(plane, travelledCities.ToList());
+						UpdateDoc(plane, travelledCities);
 					}
 				});
 			}
