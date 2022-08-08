@@ -1,15 +1,17 @@
 using Logistics.DataAccess.Models;
+using MongoDB.Bson;
+using MongoDB.Driver;
+using Optional;
 
-namespace Logistics.Service.Interfaces
+namespace Logistics.Service.Interfaces;
+
+public interface ICityService
 {
-    public interface ICityService
-    {
-        public Task<(string, IEnumerable<City>)> GetCities();
+  public Task<Option<IEnumerable<BsonDocument>, Error>> GetCities(ProjectionDefinition<BsonDocument> projection = default);
 
-        public Task<(string, City?)> GetCity(string cityId);
+  public Task<Option<BsonDocument?, Error>> GetCity(string cityId, ProjectionDefinition<BsonDocument> projection = default);
 
-        public Task<(string, NeighbouringCities?)> GetNeighbouringCities(string cityId, long count);
+  public Task<Option<IEnumerable<BsonDocument>, Error>> GetNeighbouringCities(string cityId, int count, ProjectionDefinition<BsonDocument> projection = default);
 
-        public Task<bool> CityDoesNotExists(string cityId);
-    }
+  public Task<Option<bool, Error>> CityExists(string cityId);
 }

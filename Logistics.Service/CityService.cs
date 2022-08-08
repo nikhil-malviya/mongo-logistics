@@ -1,21 +1,34 @@
-﻿using Logistics.DataAccess.Models;
+﻿using Logistics.DataAccess.Constants;
+using Logistics.DataAccess.Models;
+using Logistics.DataAccess.MongoDB;
 using Logistics.Service.Interfaces;
 using Microsoft.Extensions.Configuration;
-using MongoDB.Driver;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
+using MongoDB.Driver;
 using MongoDB.Driver.GeoJsonObjectModel;
+using Optional;
 
 namespace Logistics.Service;
 
 public class CityService : ICityService
 {
-	private readonly IMongoCollection<City> _collection;
+	private readonly IMongoCollection<BsonDocument> _collection;
 	private readonly ILogger<CityService> _logger;
+	private readonly ProjectionDefinition<BsonDocument> _defaultProjection;
 
 	public CityService(IMongoClient client, IConfiguration configuration, ILogger<CityService> logger)
 	{
-		var database = client.GetDatabase(configuration["Database"]);
-		_collection = database.GetCollection<City>(DatabaseConstants.CityCollection);
+		var database = client.GetDatabase(configuration["Database"])
+												.WithWriteConcern(WriteConcern.WMajority)
+												.WithReadConcern(ReadConcern.Majority)
+												.WithReadPreference(ReadPreference.Secondary);
+
+		_collection = database.GetCollection<BsonDocument>(Database.CityCollection);
+		_defaultProjection = Builders<BsonDocument>.Projection
+								.Include(City.Id)
+								.Include(City.Country)
+								.Include(City.Position);
 
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 	}
@@ -24,18 +37,19 @@ public class CityService : ICityService
 	/// Get all cities
 	/// </summary>
 	/// <returns>List of cities</returns>
-	public async Task<(string, IEnumerable<City>)> GetCities()
+	public async Task<Option<IEnumerable<BsonDocument>, Error>> GetCities(ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var results = await _collection.Find(_ => true).ToListAsync();
+			var cities = await Query.GetAllAsync(_collection, projection ?? _defaultProjection).ConfigureAwait(false);
 
-			return (string.Empty, results);
+			return Option.Some<IEnumerable<BsonDocument>, Error>(cities);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError("Unable to fetch cities data", ex.Message);
-			return (ex.Message, new List<City>());
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError("Unable to fetch cities data", error);
+			return Option.None<IEnumerable<BsonDocument>, Error>(error);
 		}
 	}
 
@@ -44,18 +58,21 @@ public class CityService : ICityService
 	///	</summary>
 	///	<param name="cityId">Id of city</param>
 	///	<returns>City</returns>
-	public async Task<(string, City?)> GetCity(string cityId)
+	public async Task<Option<BsonDocument?, Error>> GetCity(string cityId, ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var result = await _collection.Find(city => city.Name == cityId).FirstOrDefaultAsync();
+			var filter = Builders<BsonDocument>.Filter.Eq(City.Id, cityId);
 
-			return (string.Empty, result);
+			var city = await Query.FindOneAsync(_collection, filter, projection ?? _defaultProjection).ConfigureAwait(false);
+
+			return Option.Some<BsonDocument?, Error>(city);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to fetch city data for id: {cityId}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to fetch city data for id: {cityId}", error);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -64,31 +81,35 @@ public class CityService : ICityService
 	/// </summary>
 	/// <param name="cityId">Id of city</param>
 	/// <param name="count">Number of nearby cities</param>
-	public async Task<(string, NeighbouringCities?)> GetNeighbouringCities(string cityId, long count)
+	public async Task<Option<IEnumerable<BsonDocument>, Error>> GetNeighbouringCities(string cityId, int count, ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var neighbouringCities = new NeighbouringCities { Neighbors = new List<City>() };
-			var (error, city) = await GetCity(cityId);
+			var filter = Builders<BsonDocument>.Filter.Eq(City.Id, cityId);
+			var positionOnly = Builders<BsonDocument>.Projection.Include(City.Position);
+			var document = await Query.FindOneAsync(_collection, filter, positionOnly).ConfigureAwait(false);
 
-			if (city == null)
+			if (document == null)
 			{
-				return ("Not Found", neighbouringCities);
+				var error = new Error(ErrorCode.NotFound, $"City not found for id: {cityId}");
+				_logger.LogError($"City not found for id: {cityId}");
+				return Option.None<IEnumerable<BsonDocument>, Error>(error);
 			}
 
-			var point = new GeoJsonPoint<GeoJson2DGeographicCoordinates>(new GeoJson2DGeographicCoordinates(city.Location.X, city.Location.Y));
+			var city = new CityDocument(document);
 
-			var filter = Builders<City>.Filter.Near(x => x.Location, point);
-			var nearbyCities = await _collection.Find(filter).ToListAsync();
+			var point = new GeoJsonPoint<GeoJson2DGeographicCoordinates>(new GeoJson2DGeographicCoordinates(city.Position.Longitude, city.Position.Latitude));
+			var geoNearFilter = Builders<BsonDocument>.Filter.Near(City.Position, point);
 
-			neighbouringCities.Neighbors = nearbyCities.Take((int)count);
+			var nearbyCities = await Query.FindAsync(_collection, geoNearFilter, projection ?? _defaultProjection, count).ConfigureAwait(false);
 
-			return (string.Empty, neighbouringCities);
+			return Option.Some<IEnumerable<BsonDocument>, Error>(nearbyCities);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to fetch nearby cities for city: {cityId} count: {count}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to fetch {count} nearby cities for city having id: {cityId}", error);
+			return Option.None<IEnumerable<BsonDocument>, Error>(error);
 		}
 	}
 
@@ -97,10 +118,21 @@ public class CityService : ICityService
 	/// </summary>
 	/// <param name="cityId"></param>
 	/// <returns>True if exits or false if not</returns>
-	public async Task<bool> CityDoesNotExists(string cityId)
+	public async Task<Option<bool, Error>> CityExists(string cityId)
 	{
-		var (_error, result) = await GetCity(cityId);
+		try
+		{
+			var filter = Builders<BsonDocument>.Filter.Eq(City.Id, cityId);
 
-		return result == null;
+			var exists = await Query.DocumentExistsAsync(_collection, filter).ConfigureAwait(false);
+
+			return Option.Some<bool, Error>(exists);
+		}
+		catch (MongoException ex)
+		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to fetch city data for id: {cityId}", error);
+			return Option.None<bool, Error>(error);
+		}
 	}
 }

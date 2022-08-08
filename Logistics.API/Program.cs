@@ -1,5 +1,4 @@
-﻿using Logistics.DataAccess.ChangeStream;
-using Logistics.DataAccess.Initialize;
+﻿using Logistics.DataAccess.MongoDB;
 using Logistics.Service;
 using Logistics.Service.Interfaces;
 using MongoDB.Driver;

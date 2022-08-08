@@ -1,6 +1,11 @@
+using Logistics.API.Responses;
+using Logistics.API.Serializer;
 using Logistics.DataAccess.Models;
 using Logistics.Service.Interfaces;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using MongoDB.Bson.IO;
+using Optional.Unsafe;
 
 namespace Logistics.API.Controllers;
 
@@ -21,16 +26,14 @@ public class CityController : BaseController
 	/// <param name="destination"></param>
 	/// <returns></returns>
 	[HttpGet]
-	public async Task<ActionResult<IEnumerable<City>>> GetCities()
+	public async Task<IActionResult> GetCities()
 	{
-		var (error, results) = await _cityService.GetCities();
+		var cities = await _cityService.GetCities();
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(results);
+		return cities.Match(
+			some: results => Ok(results.ToCityResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -40,21 +43,19 @@ public class CityController : BaseController
 	/// <param name="destination"></param>
 	/// <returns></returns>
 	[HttpGet("{cityId}")]
-	public async Task<ActionResult<City>> GetCity(string cityId)
+	public async Task<IActionResult> GetCity(string cityId)
 	{
-		var (error, result) = await _cityService.GetCity(cityId);
+		var city = await _cityService.GetCity(cityId);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		if (result == null)
+		if (city.Contains(null))
 		{
 			return NotFound();
 		}
 
-		return Ok(result);
+		return city.Match(
+			some: result => Ok(result.ToCityResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -65,20 +66,28 @@ public class CityController : BaseController
 	/// <returns></returns>
 
 	[HttpGet("{cityId}/neighbors/{count}")]
-	public async Task<dynamic> GetNeighbouringCities(string cityId, long count)
+	public async Task<IActionResult> GetNeighbouringCities(string cityId, int count)
 	{
-		if (await _cityService.CityDoesNotExists(cityId))
+		var exists = await _cityService.CityExists(cityId);
+
+		Error error = new();
+		exists.MatchNone(err => error = err);
+
+		if (!exists.HasValue)
+		{
+			return ServerError(error);
+		}
+
+		if (exists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var (error, result) = await _cityService.GetNeighbouringCities(cityId, count);
+		var results = await _cityService.GetNeighbouringCities(cityId, count);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(result);
+		return results.Match(
+			some: results => Ok(new { Neighbors = results.ToCityResponse() }),
+			none: error => ServerError(error)
+		);
 	}
 }

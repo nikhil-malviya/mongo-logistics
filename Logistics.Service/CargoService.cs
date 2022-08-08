@@ -1,36 +1,49 @@
 ﻿using Logistics.DataAccess.Constants;
 using Logistics.DataAccess.Models;
+using Logistics.DataAccess.MongoDB;
 using Logistics.Service.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
+using Optional;
 
 namespace Logistics.Service;
 
 public class CargoService : ICargoService
 {
-	private readonly IMongoCollection<Cargo> _collection;
+	private readonly IMongoCollection<BsonDocument> _collection;
 	private readonly ILogger<CargoService> _logger;
+	private readonly ProjectionDefinition<BsonDocument> _defaultProjection;
 
 	public CargoService(IMongoClient client, IConfiguration configuration, ILogger<CargoService> logger)
 	{
-		var database = client.GetDatabase(configuration["Database"]);
-		_collection = database.GetCollection<Cargo>(DatabaseConstants.CargoCollection);
+		var database = client.GetDatabase(configuration["Database"])
+										.WithWriteConcern(WriteConcern.WMajority)
+										.WithReadConcern(ReadConcern.Majority);
+
+		_collection = database.GetCollection<BsonDocument>(Database.CargoCollection);
+		_defaultProjection = Builders<BsonDocument>.Projection
+						.Include(Cargo.Id)
+						.Include(Cargo.Courier)
+						.Include(Cargo.Received)
+						.Include(Cargo.Status)
+						.Include(Cargo.Location)
+						.Include(Cargo.Destination);
 
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 	}
-
 
 	/// <summary>
 	/// Create a cargo with location to destination
 	/// </summary>
 	/// <param name="location"></param>
 	/// <param name="destination"></param>
-	public async Task<(string, Cargo?)> AddCargo(string location, string destination)
+	public async Task<Option<BsonDocument?, Error>> AddCargo(string location, string destination)
 	{
 		try
 		{
-			var cargo = new Cargo
+			var cargo = new CargoDocument(new BsonDocument())
 			{
 				Received = DateTime.UtcNow,
 				Location = location,
@@ -38,14 +51,15 @@ public class CargoService : ICargoService
 				Status = CargoStatus.InProcess,
 			};
 
-			await _collection.InsertOneAsync(cargo);
+			await Command.InsertOneAsync(_collection, cargo.Document);
 
-			return (String.Empty, cargo);
+			return Option.Some<BsonDocument?, Error>(cargo.Document);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to create create cargo from {location} to {destination}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to add cargo for location: {location} and destination: {destination}", ex.Message);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -54,24 +68,22 @@ public class CargoService : ICargoService
 	/// </summary>
 	/// <param name="location"></param>
 	/// <returns></returns>
-	public async Task<(string, IEnumerable<Cargo>)> GetCargos(string location)
+	public async Task<Option<IEnumerable<BsonDocument>, Error>> GetCargos(string location, ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var builder = Builders<Cargo>.Filter;
-			var filter = builder.Empty;
+			var builder = Builders<BsonDocument>.Filter;
+			var filter = builder.Eq(Cargo.Location, location) & builder.Eq(Cargo.Status, CargoStatus.InProcess);
 
-			filter &= builder.Eq(cargo => cargo.Location, location);
-			filter &= builder.Eq(cargo => cargo.Status, CargoStatus.InProcess);
+			var cargos = await Query.FindAsync(_collection, filter, projection ?? _defaultProjection).ConfigureAwait(false);
 
-			var result = await _collection.FindAsync(filter);
-
-			return (String.Empty, result.ToList());
+			return Option.Some<IEnumerable<BsonDocument>, Error>(cargos);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError("Unable to fetch cargo data", ex.Message);
-			return (ex.Message, new List<Cargo>());
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError("Unable to fetch cargos data", error);
+			return Option.None<IEnumerable<BsonDocument>, Error>(error);
 		}
 	}
 
@@ -79,22 +91,23 @@ public class CargoService : ICargoService
 	/// Updates cargo courier to null
 	/// </summary>
 	/// <param name="cargoId"></param>
-	public async Task<(string, Cargo?)> UnloadCargo(string cargoId)
+	public async Task<Option<BsonDocument?, Error>> UnloadCargo(string cargoId)
 	{
 		try
 		{
-			var filter = Builders<Cargo>.Filter.Eq(cargo => cargo.Id, cargoId);
-			var update = Builders<Cargo>.Update
-					.Set(cargo => cargo.Courier, null);
+			var filter = Builders<BsonDocument>.Filter.Eq(Cargo.Id, new ObjectId(cargoId));
+			var update = Builders<BsonDocument>.Update
+					.Set(Cargo.Courier, default(string));
 
-			var result = await _collection.FindOneAndUpdateAsync(filter, update);
+			var result = await Command.FindOneAndUpdateAsync(_collection, filter, update);
 
-			return (string.Empty, result);
+			return Option.Some<BsonDocument?, Error>(result);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError(ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to set cargo courier to null for cargoId: {cargoId}", error);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -103,22 +116,23 @@ public class CargoService : ICargoService
 	/// </summary>
 	/// <param name="cargoId"></param>
 	/// <returns></returns>
-	public async Task<(string, bool)> DeliverCargo(string cargoId)
+	public async Task<Option<bool, Error>> DeliverCargo(string cargoId)
 	{
 		try
 		{
-			var filter = Builders<Cargo>.Filter.Eq(cargo => cargo.Id, cargoId);
-			var update = Builders<Cargo>.Update
-					.Set(cargo => cargo.Status, CargoStatus.Delivered);
+			var filter = Builders<BsonDocument>.Filter.Eq(Cargo.Id, new ObjectId(cargoId));
+			var update = Builders<BsonDocument>.Update
+					.Set(Cargo.Status, CargoStatus.Delivered);
 
-			var result = await _collection.UpdateOneAsync(filter, update);
+			var result = await Command.UpdateOneAsync(_collection, filter, update);
 
-			return (string.Empty, result.IsAcknowledged && result.ModifiedCount == 1);
+			return Option.Some<bool, Error>(result.IsAcknowledged && result.ModifiedCount == 1);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to set cargo status as delivered for {cargoId}", ex.Message);
-			return (ex.Message, false);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to set cargo status as delivered for cargoId: {cargoId}", ex.Message);
+			return Option.None<bool, Error>(error);
 		}
 	}
 
@@ -127,22 +141,23 @@ public class CargoService : ICargoService
 	/// </summary>
 	/// <param name="cargoId"></param>
 	/// <param name="planeId"></param>
-	public async Task<(string, bool)> UpdateCargo(string cargoId, string courierId)
+	public async Task<Option<bool, Error>> UpdateCargo(string cargoId, string courierId)
 	{
 		try
 		{
-			var filter = Builders<Cargo>.Filter.Eq(cargo => cargo.Id, cargoId);
-			var update = Builders<Cargo>.Update
-					.Set(cargo => cargo.Courier, courierId);
+			var filter = Builders<BsonDocument>.Filter.Eq(Cargo.Id, new ObjectId(cargoId));
+			var update = Builders<BsonDocument>.Update
+					.Set(Cargo.Courier, courierId);
 
-			var result = await _collection.UpdateOneAsync(filter, update);
+			var result = await Command.UpdateOneAsync(_collection, filter, update);
 
-			return (string.Empty, result.IsAcknowledged && result.ModifiedCount == 1);
+			return Option.Some<bool, Error>(result.IsAcknowledged && result.ModifiedCount == 1);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to set courier {courierId} on cargo {cargoId}", ex.Message);
-			return (ex.Message, false);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to set courier as {courierId} for cargoid: {cargoId}", ex.Message);
+			return Option.None<bool, Error>(error);
 		}
 	}
 
@@ -151,22 +166,23 @@ public class CargoService : ICargoService
 	/// </summary>
 	/// <param name="cargoId"></param>
 	/// <param name="location"></param>
-	public async Task<(string, Cargo?)> UpdateCargoLocation(string cargoId, string location)
+	public async Task<Option<BsonDocument?, Error>> UpdateCargoLocation(string cargoId, string location)
 	{
 		try
 		{
-			var filter = Builders<Cargo>.Filter.Eq(cargo => cargo.Id, cargoId);
-			var update = Builders<Cargo>.Update
-					.Set(cargo => cargo.Location, location);
+			var filter = Builders<BsonDocument>.Filter.Eq(Cargo.Id, new ObjectId(cargoId));
+			var update = Builders<BsonDocument>.Update
+					.Set(Cargo.Location, location);
 
-			var result = await _collection.FindOneAndUpdateAsync(filter, update);
+			var result = await Command.FindOneAndUpdateAsync(_collection, filter, update);
 
-			return (string.Empty, result);
+			return Option.Some<BsonDocument?, Error>(result);
 		}
 		catch (MongoException ex)
 		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
 			_logger.LogError($"Unable to update location {location} on cargo {cargoId}", ex.Message);
-			return (ex.Message, null);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 }

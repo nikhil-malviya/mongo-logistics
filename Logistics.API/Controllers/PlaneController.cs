@@ -1,7 +1,8 @@
+using Logistics.API.Serializer;
 using Logistics.DataAccess.Models;
+using Logistics.DataAccess.Utilities;
 using Logistics.Service.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-using MongoDB.Driver.GeoJsonObjectModel;
 
 namespace Logistics.API.Controllers;
 
@@ -22,16 +23,14 @@ public class PlaneController : BaseController
 	/// </summary>
 	/// <returns></returns>
 	[HttpGet]
-	public async Task<ActionResult<IEnumerable<Plane>>> GetPlanes()
+	public async Task<IActionResult> GetPlanes()
 	{
-		var (error, results) = await _planeService.GetPlanes();
+		var planes = await _planeService.GetPlanes();
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(results);
+		return planes.Match(
+			some: results => Ok(results.ToPlaneResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -40,21 +39,19 @@ public class PlaneController : BaseController
 	/// <param name="planeId"></param>
 	/// <returns></returns>
 	[HttpGet("{planeId}")]
-	public async Task<ActionResult<Plane>> GetPlane(string planeId)
+	public async Task<IActionResult> GetPlane(string planeId)
 	{
-		var (error, result) = await _planeService.GetPlane(planeId);
+		var plane = await _planeService.GetPlane(planeId);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		if (result == null)
+		if (plane.Contains(null))
 		{
 			return NotFound();
 		}
 
-		return Ok(result);
+		return plane.Match(
+			some: result => Ok(result.ToPlaneResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -65,27 +62,35 @@ public class PlaneController : BaseController
 	/// <param name="heading"></param>
 	/// <returns></returns>
 	[HttpPut("{planeId}/location/{location}/{heading}")]
-	public async Task<ActionResult<Plane>> UpdatePlaneLocation(string planeId, string location, double heading)
+	public async Task<IActionResult> UpdatePlaneLocation(string planeId, string location, double heading)
 	{
-		if (await _planeService.PlaneDoesNotExists(planeId))
+		var exists = await _planeService.PlaneExists(planeId);
+
+		Error error = new();
+		exists.MatchNone(err => error = err);
+
+		if (!exists.HasValue)
+		{
+			return ServerError(error);
+		}
+
+		if (exists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var (parsed, newLocation) = TryParseLocation(location);
+		var (parsed, newLocation) = location.TryParseCoordinates();
 		if (!parsed)
 		{
 			return BadRequest();
 		}
 
-		var (error, result) = await _planeService.UpdatePlaneLocation(planeId, newLocation, heading);
+		var result = await _planeService.UpdatePlaneLocation(planeId, newLocation, heading);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(result);
+		return result.Match(
+			some: result => Ok(result.ToPlaneResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -97,27 +102,50 @@ public class PlaneController : BaseController
 	/// <param name="cityId"></param>
 	/// <returns></returns>
 	[HttpPut("{planeId}/location/{location}/{heading}/{cityId}")]
-	public async Task<ActionResult<Plane>> LandPlane(string planeId, [FromRoute] string location, double heading, string cityId)
+	public async Task<IActionResult> LandPlane(string planeId, [FromRoute] string location, double heading, string cityId)
 	{
-		if (await _cityService.CityDoesNotExists(cityId))
+		var cityExists = await _cityService.CityExists(cityId);
+
+		Error errorCity = new();
+		cityExists.MatchNone(err => errorCity = err);
+
+		if (!cityExists.HasValue)
+		{
+			return ServerError(errorCity);
+		}
+
+		if (cityExists.Contains(false))
 		{
 			return BadRequest();
 		}
-		if (await _planeService.PlaneDoesNotExists(planeId))
+
+		var planeExists = await _planeService.PlaneExists(planeId);
+
+		Error errorPlane = new();
+		planeExists.MatchNone(err => errorPlane = err);
+
+		if (!planeExists.HasValue)
+		{
+			return ServerError(errorPlane);
+		}
+
+		if (planeExists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var newLocation = new GeoJson2DCoordinates(double.Parse(location.Split(',')[0]), double.Parse(location.Split(',')[1]));
-
-		var (error, result) = await _planeService.LandPlane(planeId, newLocation, heading, cityId);
-
-		if (!string.IsNullOrWhiteSpace(error))
+		var (parsed, newLocation) = location.TryParseCoordinates();
+		if (!parsed)
 		{
-			return ServerError();
+			return BadRequest();
 		}
 
-		return Ok(result);
+		var result = await _planeService.LandPlane(planeId, newLocation, heading, cityId);
+
+		return result.Match(
+			some: result => Ok(result.ToPlaneResponse()),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -126,21 +154,29 @@ public class PlaneController : BaseController
 	/// <param name="planeId"></param>
 	/// <returns></returns>
 	[HttpDelete("{planeId}/route/destination")]
-	public async Task<ActionResult<bool>> RemoveDestination(string planeId)
+	public async Task<IActionResult> RemoveDestination(string planeId)
 	{
-		if (await _planeService.PlaneDoesNotExists(planeId))
+		var exists = await _planeService.PlaneExists(planeId);
+
+		Error error = new();
+		exists.MatchNone(err => error = err);
+
+		if (!exists.HasValue)
+		{
+			return ServerError(error);
+		}
+
+		if (exists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var (error, result) = await _planeService.RemoveDestination(planeId);
+		var result = await _planeService.RemoveDestination(planeId);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(result);
+		return result.Match(
+			some: result => Ok(result),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -150,25 +186,44 @@ public class PlaneController : BaseController
 	/// <param name="cityId"></param>
 	/// <returns></returns>
 	[HttpPut("{planeId}/route/{cityId}")]
-	public async Task<ActionResult<bool>> ReplaceDestination(string planeId, string cityId)
+	public async Task<IActionResult> ReplaceDestination(string planeId, string cityId)
 	{
-		if (await _cityService.CityDoesNotExists(cityId))
+		var cityExists = await _cityService.CityExists(cityId);
+
+		Error errorCity = new();
+		cityExists.MatchNone(err => errorCity = err);
+
+		if (!cityExists.HasValue)
+		{
+			return ServerError(errorCity);
+		}
+
+		if (cityExists.Contains(false))
 		{
 			return BadRequest();
 		}
-		if (await _planeService.PlaneDoesNotExists(planeId))
+
+		var planeExists = await _planeService.PlaneExists(planeId);
+
+		Error errorPlane = new();
+		planeExists.MatchNone(err => errorPlane = err);
+
+		if (!planeExists.HasValue)
+		{
+			return ServerError(errorPlane);
+		}
+
+		if (planeExists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var (error, result) = await _planeService.ReplaceDestination(planeId, cityId);
+		var result = await _planeService.ReplaceDestination(planeId, cityId);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(result);
+		return result.Match(
+			some: result => Ok(result),
+			none: error => ServerError(error)
+		);
 	}
 
 	/// <summary>
@@ -178,40 +233,43 @@ public class PlaneController : BaseController
 	/// <param name="cityId"></param>
 	/// <returns></returns>
 	[HttpPost("{planeId}/route/{cityId}")]
-	public async Task<ActionResult<bool>> UpdateDestination(string planeId, string cityId)
+	public async Task<IActionResult> UpdateDestination(string planeId, string cityId)
 	{
-		if (await _cityService.CityDoesNotExists(cityId))
+		var cityExists = await _cityService.CityExists(cityId);
+
+		Error errorCity = new();
+		cityExists.MatchNone(err => errorCity = err);
+
+		if (!cityExists.HasValue)
+		{
+			return ServerError(errorCity);
+		}
+
+		if (cityExists.Contains(false))
 		{
 			return BadRequest();
 		}
-		if (await _planeService.PlaneDoesNotExists(planeId))
+
+		var planeExists = await _planeService.PlaneExists(planeId);
+
+		Error errorPlane = new();
+		planeExists.MatchNone(err => errorPlane = err);
+
+		if (!planeExists.HasValue)
+		{
+			return ServerError(errorPlane);
+		}
+
+		if (planeExists.Contains(false))
 		{
 			return BadRequest();
 		}
 
-		var (error, result) = await _planeService.UpdateDestination(planeId, cityId);
+		var result = await _planeService.UpdateDestination(planeId, cityId);
 
-		if (!string.IsNullOrWhiteSpace(error))
-		{
-			return ServerError();
-		}
-
-		return Ok(result);
-	}
-
-	/// <summary>
-	/// Try parse location string to GeoJson2DCoordinates
-	/// </summary>
-	/// <param name="location"></param>
-	/// <returns></returns>
-	private (bool, GeoJson2DCoordinates) TryParseLocation(string location)
-	{
-		var tokens = location.Split(',');
-		if (tokens.Length != 2 || !double.TryParse(tokens[0], out double latitude) || !double.TryParse(tokens[1], out double longitude))
-		{
-			return (false, new GeoJson2DCoordinates(0, 0));
-		}
-
-		return (true, new GeoJson2DCoordinates(latitude, longitude));
+		return result.Match(
+			some: result => Ok(result),
+			none: error => ServerError(error)
+		);
 	}
 }

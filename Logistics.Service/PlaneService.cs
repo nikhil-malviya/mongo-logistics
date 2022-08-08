@@ -1,21 +1,36 @@
-﻿using Logistics.DataAccess.Models;
+﻿using Logistics.DataAccess.Constants;
+using Logistics.DataAccess.Models;
+using Logistics.DataAccess.MongoDB;
+using Logistics.DataAccess.Utilities;
 using Logistics.Service.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using MongoDB.Driver.GeoJsonObjectModel;
+using Optional;
 
 namespace Logistics.Service;
 
 public class PlaneService : IPlaneService
 {
-	private readonly IMongoCollection<Plane> _collection;
+	private readonly IMongoCollection<BsonDocument> _collection;
 	private readonly ILogger<PlaneService> _logger;
+	private readonly ProjectionDefinition<BsonDocument> _defaultProjection;
 
 	public PlaneService(IMongoClient client, IConfiguration configuration, ILogger<PlaneService> logger)
 	{
-		var database = client.GetDatabase(configuration["Database"]);
-		_collection = database.GetCollection<Plane>(DatabaseConstants.PlaneCollection);
+		var database = client.GetDatabase(configuration["Database"])
+														.WithWriteConcern(WriteConcern.WMajority)
+														.WithReadConcern(ReadConcern.Majority);
+
+		_collection = database.GetCollection<BsonDocument>(Database.PlaneCollection);
+		_defaultProjection = Builders<BsonDocument>.Projection
+						.Include(Plane.Id)
+						.Include(Plane.Heading)
+						.Include(Plane.CurrentLocation)
+						.Include(Plane.Route)
+						.Include(Plane.Landed);
 
 		_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 	}
@@ -24,18 +39,19 @@ public class PlaneService : IPlaneService
 	/// Get all planes
 	/// </summary>
 	/// <returns>List of planes</returns>
-	public async Task<(string, IEnumerable<Plane>)> GetPlanes()
+	public async Task<Option<IEnumerable<BsonDocument>, Error>> GetPlanes(ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var results = await _collection.Find(_ => true).ToListAsync();
+			var planes = await Query.GetAllAsync(_collection, projection ?? _defaultProjection).ConfigureAwait(false);
 
-			return (string.Empty, results);
+			return Option.Some<IEnumerable<BsonDocument>, Error>(planes);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError("Unable to fetch planes data", ex.Message);
-			return (ex.Message, new List<Plane>());
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError("Unable to fetch planes data", error);
+			return Option.None<IEnumerable<BsonDocument>, Error>(error);
 		}
 	}
 
@@ -44,18 +60,21 @@ public class PlaneService : IPlaneService
 	///	</summary>
 	///	<param name="planeId">Id of plane</param>
 	///	<returns>Plane</returns>
-	public async Task<(string, Plane?)> GetPlane(string planeId)
+	public async Task<Option<BsonDocument?, Error>> GetPlane(string planeId, ProjectionDefinition<BsonDocument> projection = default)
 	{
 		try
 		{
-			var result = await _collection.Find(plane => plane.Callsign == planeId).FirstOrDefaultAsync();
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
 
-			return (string.Empty, result);
+			var plane = await Query.FindOneAsync(_collection, filter, projection ?? _defaultProjection).ConfigureAwait(false);
+
+			return Option.Some<BsonDocument?, Error>(plane);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to fetch plane data for id: {planeId}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to fetch plane data for id: {planeId}", error);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -65,23 +84,33 @@ public class PlaneService : IPlaneService
 	/// <param name="planeId">Id of plane</param>
 	/// <param name="newLocation">New location of plane</param>
 	/// <param name="heading">Angle in degrees</param>
-	public async Task<(string, Plane?)> UpdatePlaneLocation(string planeId, GeoJson2DCoordinates newLocation, double heading)
+	public async Task<Option<BsonDocument?, Error>> UpdatePlaneLocation(string planeId, GeoJson2DGeographicCoordinates newLocation, double heading)
 	{
 		try
 		{
-			var filter = Builders<Plane>.Filter.Eq(plane => plane.Callsign, planeId);
-			var update = Builders<Plane>.Update
-					.Set(plane => plane.CurrentLocation, newLocation)
-					.Set(plane => plane.Heading, heading);
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
+			var update = Builders<BsonDocument>.Update
+					.Set(Plane.CurrentLocation, newLocation.ToBsonArray())
+					.Set(Plane.Heading, heading);
 
-			var result = await _collection.FindOneAndUpdateAsync(filter, update);
+			var result = await Command.FindOneAndUpdateAsync(_collection, filter, update);
 
-			return (string.Empty, result);
+			// First time the plane takes off, set the departed time
+			if (result.GetValueAsDateTime(Plane.LandedOn) == null)
+			{
+				var updateDeparted = Builders<BsonDocument>.Update
+					.Set(Plane.LandedOn, DateTime.UtcNow);
+
+				await Command.UpdateOneAsync(_collection, filter, updateDeparted);
+			}
+
+			return Option.Some<BsonDocument?, Error>(result);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to update plane location for id: {planeId} latitude: {newLocation.X} longitude: {newLocation.Y} heading: {heading}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to update plane location for id: {planeId} latitude: {newLocation.Latitude} longitude: {newLocation.Longitude} heading: {heading}", ex.Message);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -92,25 +121,26 @@ public class PlaneService : IPlaneService
 	/// <param name="newLocation">New location of plane</param>
 	/// <param name="heading">Angle in degrees</param>
 	/// <param name="cityId">Id of city</param>
-	public async Task<(string, Plane?)> LandPlane(string planeId, GeoJson2DCoordinates newLocation, double heading, string cityId)
+	public async Task<Option<BsonDocument?, Error>> LandPlane(string planeId, GeoJson2DGeographicCoordinates newLocation, double heading, string cityId)
 	{
 		try
 		{
-			var filter = Builders<Plane>.Filter.Eq(plane => plane.Callsign, planeId);
-			var update = Builders<Plane>.Update
-					.Set(plane => plane.CurrentLocation, newLocation)
-					.Set(plane => plane.Heading, heading)
-					.Set(plane => plane.Landed, cityId)
-					.Set(plane => plane.LandedOn, DateTime.UtcNow);
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
+			var update = Builders<BsonDocument>.Update
+					.Set(Plane.CurrentLocation, newLocation.ToBsonArray())
+					.Set(Plane.Heading, heading)
+					.Set(Plane.Landed, cityId)
+					.Set(Plane.LandedOn, DateTime.UtcNow);
 
-			var result = await _collection.FindOneAndUpdateAsync(filter, update);
+			var result = await Command.FindOneAndUpdateAsync(_collection, filter, update);
 
-			return (string.Empty, result);
+			return Option.Some<BsonDocument?, Error>(result);
 		}
 		catch (MongoException ex)
 		{
-			_logger.LogError($"Unable to land plane id: {planeId} latitude: {newLocation.X} longitude: {newLocation.Y} heading: {heading} city {cityId}", ex.Message);
-			return (ex.Message, null);
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to land plane id: {planeId} latitude: {newLocation.Latitude} longitude: {newLocation.Longitude} heading: {heading} city {cityId}", ex.Message);
+			return Option.None<BsonDocument?, Error>(error);
 		}
 	}
 
@@ -118,32 +148,36 @@ public class PlaneService : IPlaneService
 	/// Remove first route from plane route list
 	/// </summary>
 	/// <param name="planeId">Id of plane</param>
-	public async Task<(string, bool)> RemoveDestination(string planeId)
+	public async Task<Option<bool, Error>> RemoveDestination(string planeId)
 	{
 		try
 		{
-			var filter = Builders<Plane>.Filter.Eq(plane => plane.Callsign, planeId);
-			var plane = await _collection.Find(filter).FirstOrDefaultAsync();
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
+			var routeOnly = Builders<BsonDocument>.Projection.Include(Plane.Route);
+			var document = await Query.FindOneAsync(_collection, filter, routeOnly).ConfigureAwait(false);
 
+			var plane = new PlaneDocument(document);
 			var previouslyLanded = string.Empty;
 
-			if (plane?.Route?.Length > 0)
+			if (plane.Route.Length > 0)
 			{
 				previouslyLanded = plane.Route.First();
 			}
 
-			var update = Builders<Plane>.Update
-					.Set(plane => plane.PreviousLanded, previouslyLanded)
-					.PopFirst(p => p.Route);
+			// Remove first route from route list and set it as departed city
+			var update = Builders<BsonDocument>.Update
+					.Set(Plane.Departed, previouslyLanded)
+					.PopFirst(Plane.Route);
 
-			var result = await _collection.UpdateOneAsync(filter, update);
+			var result = await Command.UpdateOneAsync(_collection, filter, update);
 
-			return (string.Empty, result.IsAcknowledged && result.ModifiedCount == 1);
+			return Option.Some<bool, Error>(result.IsAcknowledged && result.ModifiedCount == 1);
 		}
 		catch (MongoException ex)
 		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
 			_logger.LogError($"Unable to remove destination from route for id: {planeId}", ex.Message);
-			return (ex.Message, false);
+			return Option.None<bool, Error>(error);
 		}
 	}
 
@@ -152,22 +186,23 @@ public class PlaneService : IPlaneService
 	/// </summary>
 	/// <param name="planeId">Id of plane</param>
 	/// <param name="cityId">Id of city</param>
-	public async Task<(string, bool)> ReplaceDestination(string planeId, string cityId)
+	public async Task<Option<bool, Error>> ReplaceDestination(string planeId, string cityId)
 	{
 		try
 		{
-			var filter = Builders<Plane>.Filter.Eq(plane => plane.Callsign, planeId);
-			var update = Builders<Plane>.Update
-					.Set(plane => plane.Route, new string[] { cityId });
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
+			var update = Builders<BsonDocument>.Update
+					.Set(Plane.Route, new string[] { cityId });
 
-			var result = await _collection.UpdateOneAsync(filter, update);
+			var result = await Command.UpdateOneAsync(_collection, filter, update);
 
-			return (string.Empty, result.IsAcknowledged && result.ModifiedCount == 1);
+			return Option.Some<bool, Error>(result.IsAcknowledged && result.ModifiedCount == 1);
 		}
 		catch (MongoException ex)
 		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
 			_logger.LogError($"Unable to replace destination for id: {planeId}", ex.Message);
-			return (ex.Message, false);
+			return Option.None<bool, Error>(error);
 		}
 	}
 
@@ -176,22 +211,23 @@ public class PlaneService : IPlaneService
 	/// </summary>
 	/// <param name="planeId">Id of plane</param>
 	/// <param name="cityId">Id of city</param>
-	public async Task<(string, bool)> UpdateDestination(string planeId, string cityId)
+	public async Task<Option<bool, Error>> UpdateDestination(string planeId, string cityId)
 	{
 		try
 		{
-			var filter = Builders<Plane>.Filter.Eq(plane => plane.Callsign, planeId);
-			var update = Builders<Plane>.Update
-					.AddToSet(plane => plane.Route, cityId);
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
+			var update = Builders<BsonDocument>.Update
+					.AddToSet(Plane.Route, cityId);
 
-			var result = await _collection.UpdateOneAsync(filter, update);
+			var result = await Command.UpdateOneAsync(_collection, filter, update);
 
-			return (string.Empty, result.IsAcknowledged && result.ModifiedCount == 1);
+			return Option.Some<bool, Error>(result.IsAcknowledged && result.ModifiedCount == 1);
 		}
 		catch (MongoException ex)
 		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
 			_logger.LogError($"Unable to add city: {cityId} for id: {planeId}", ex.Message);
-			return (ex.Message, false);
+			return Option.None<bool, Error>(error);
 		}
 	}
 
@@ -200,10 +236,22 @@ public class PlaneService : IPlaneService
 	/// </summary>
 	/// <param name="planeId"></param>
 	/// <returns>True if exits or false if not</returns>
-	public async Task<bool> PlaneDoesNotExists(string cityId)
+	///
+	public async Task<Option<bool, Error>> PlaneExists(string planeId)
 	{
-		var (_error, result) = await GetPlane(cityId);
+		try
+		{
+			var filter = Builders<BsonDocument>.Filter.Eq(Plane.Id, planeId);
 
-		return result == null;
+			var exists = await Query.DocumentExistsAsync(_collection, filter).ConfigureAwait(false);
+
+			return Option.Some<bool, Error>(exists);
+		}
+		catch (MongoException ex)
+		{
+			var error = new Error(ErrorCode.MongoError, ex.Message);
+			_logger.LogError($"Unable to fetch city data for id: {planeId}", error);
+			return Option.None<bool, Error>(error);
+		}
 	}
 }

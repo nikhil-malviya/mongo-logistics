@@ -1,3 +1,4 @@
+using Logistics.DataAccess.Models;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Logistics.API.Controllers;
@@ -6,8 +7,18 @@ namespace Logistics.API.Controllers;
 [Route("/")]
 public class BaseController : ControllerBase
 {
-	protected ObjectResult ServerError()
+	public const string JsonContentType = "application/json";
+
+	protected ObjectResult ServerError(Error error)
 	{
-		return StatusCode(500, "Internal server error");
+		return StatusCode(500, $"Internal server error. Error code: {error.Code}");
+	}
+
+	protected async Task<OkResult> WriteResponseAsync(string json)
+	{
+		Response.ContentType = JsonContentType;
+		await Response.WriteAsync(json);
+
+		return Ok();
 	}
 }
