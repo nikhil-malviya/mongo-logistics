@@ -211,7 +211,8 @@ public static async Task<IEnumerable<BsonDocument>> FindAsync(IMongoCollection<B
 ```csharp
 public static async Task<UpdateResult> UpdateOneAsync(IMongoCollection<BsonDocument> collection, FilterDefinition<BsonDocument> filter, UpdateDefinition<BsonDocument> update, CancellationToken cancellationToken = default)
 {
-return await collection.UpdateOneAsync(filter, update, default, cancellationToken);
+    update.CurrentDate(UpdatedAt);
+    return await collection.UpdateOneAsync(filter, update, default, cancellationToken);
 }
 ```
 
@@ -231,12 +232,13 @@ return await collection.UpdateOneAsync(filter, update, default, cancellationToke
 - Indexes are created for collections to improve performance. GeoSpatial indexes are created for `cities` and `planes` collections at application startup.
 - Aggregations include `metadata` which holds schema type and version, these are populated when a collection is created. Some fields like `departed` are populated while creating `planes` collection to save computations.
 
-```json
+```
 createdAt: new Date(),
 metadata: {
     schemaType: 'plane',
     schemaVersion: '1.0',
 }
+```
 
 ## Future Work
 - There are many ways to improve the application. For example the nearby cities can be pre-computed and stored in the database. Old data can be archived and frequently accessed data can be served via inmemory storage engine.
