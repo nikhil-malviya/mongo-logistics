@@ -9,7 +9,7 @@ namespace Logistics.DataAccess.MongoDB;
 
 public static class ChangeStream
 {
-	private static readonly string _prefix = "statistics.";
+	private static readonly string _prefix = "statistics";
 	private static object locker = new object();
 
 	public static async Task Monitor(IMongoClient client, IConfiguration configuration)
@@ -120,6 +120,6 @@ public static class ChangeStream
 
 	private static string TrimPrefix(this string field)
 	{
-		return field.Replace(_prefix, string.Empty);
+		return field.Replace($"{_prefix}.", string.Empty);
 	}
 }

@@ -2,7 +2,7 @@
 
 public static class Database
 {
-	public const string CargoCollection = "cargo";
+	public const string CargoCollection = "cargos";
 
 	public const string PlaneCollection = "planes";
 
