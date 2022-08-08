@@ -82,7 +82,7 @@ Create a new collection `cities` using the following aggregation on `worldcities
    $concat: [
     {
      $replaceAll: {
-      input: '$cities15.country',
+      input: '$cities15.city_ascii',
       find: '/',
       replacement: '%2F'
      }
@@ -90,7 +90,7 @@ Create a new collection `cities` using the following aggregation on `worldcities
     ' - ',
     {
      $replaceAll: {
-      input: '$cities15.city_ascii',
+      input: '$cities15.country',
       find: '/',
       replacement: '%2F'
      }
