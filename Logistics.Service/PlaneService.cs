@@ -166,7 +166,6 @@ public class PlaneService : IPlaneService
 
 			// Remove first route from route list and set it as departed city
 			var update = Builders<BsonDocument>.Update
-					.Set(Plane.Departed, previouslyLanded)
 					.PopFirst(Plane.Route);
 
 			var result = await Command.UpdateOneAsync(_collection, filter, update);

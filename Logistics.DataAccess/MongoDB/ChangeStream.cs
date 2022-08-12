@@ -46,7 +46,8 @@ public static class ChangeStream
 
 						var travelledCities = citiesCollection.Find(filter).ToList();
 
-						UpdateDoc(plane, travelledCities);
+						plane.Departed = plane.Landed;
+						UpdatePlaneStatistics(plane, travelledCities);
 					}
 				});
 			}
@@ -57,7 +58,7 @@ public static class ChangeStream
 		}
 	}
 
-	public static void UpdateDoc(PlaneDocument plane, List<BsonDocument> travelledCities)
+	public static void UpdatePlaneStatistics(PlaneDocument plane, List<BsonDocument> travelledCities)
 	{
 		lock (locker)
 		{

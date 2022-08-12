@@ -33,49 +33,5 @@ public class CityDocument : BaseDocument
 		set => Document.Set(City.Position, value.ToBsonArray());
 	}
 
-	public DateTime? CreatedAt
-	{
-		get => Document.GetValueAsDateTime(City.CreatedAt);
-		set => Document.Set(City.CreatedAt, value);
-	}
-
-	public DateTime? UpdatedAt
-	{
-		get => Document.GetValueAsDateTime(City.UpdatedAt);
-		set => Document.Set(City.UpdatedAt, value);
-	}
-
-	#region Metadata
-
-	public string SchemaType
-	{
-		get => Document.GetValueAsString(City.SchemaType);
-		set => Document.Set(City.SchemaType, value);
-	}
-
-	public string SchemaVersion
-	{
-		get => Document.GetValueAsString(City.SchemaVersion);
-		set => Document.Set(City.SchemaVersion, value);
-	}
-
-	#endregion Metadata
-
-	public BsonValue Get(string field)
-	{
-		return Document.GetValue(field);
-	}
-
-	public void Set(string field, BsonValue value)
-	{
-		Document.Set(field, value);
-	}
-
-	private readonly BsonDocument _document;
-	public BsonDocument Document => _document;
-
-	public CityDocument(BsonDocument document) : base(document, "city", "1.0")
-	{
-		_document = document;
-	}
+	public CityDocument(BsonDocument document) : base(document, "city", "1.0") { }
 }
