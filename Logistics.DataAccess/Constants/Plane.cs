@@ -27,16 +27,4 @@ public static class Plane
 	public const string AirtimeInMinutes = "statistics.airtimeInMinutes";
 
 	#endregion Statistics
-
-	public const string CreatedAt = "createdAt";
-
-	public const string UpdatedAt = "updatedAt";
-
-	#region Metadata
-
-	public const string SchemaType = "metadata.schemaType";
-
-	public const string SchemaVersion = "metadata.schemaVersion";
-
-	#endregion Metadata
 }

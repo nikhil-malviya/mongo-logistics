@@ -50,49 +50,5 @@ public class CargoDocument : BaseDocument
 		set => Document.Set(Cargo.Destination, value);
 	}
 
-	public DateTime? CreatedAt
-	{
-		get => Document.GetValueAsDateTime(Cargo.CreatedAt);
-		set => Document.Set(Cargo.CreatedAt, value);
-	}
-
-	public DateTime? UpdatedAt
-	{
-		get => Document.GetValueAsDateTime(Cargo.UpdatedAt);
-		set => Document.Set(Cargo.UpdatedAt, value);
-	}
-
-	#region Metadata
-
-	public string SchemaType
-	{
-		get => Document.GetValueAsString(Cargo.SchemaType);
-		set => Document.Set(Cargo.SchemaType, value);
-	}
-
-	public string SchemaVersion
-	{
-		get => Document.GetValueAsString(Cargo.SchemaVersion);
-		set => Document.Set(Cargo.SchemaVersion, value);
-	}
-
-	#endregion Metadata
-
-	public BsonValue Get(string field)
-	{
-		return Document.GetValue(field);
-	}
-
-	public void Set(string field, BsonValue value)
-	{
-		Document.Set(field, value);
-	}
-
-	private readonly BsonDocument _document;
-	public BsonDocument Document => _document;
-
-	public CargoDocument(BsonDocument document) : base(document, "cargo", "1.0")
-	{
-		_document = document;
-	}
+	public CargoDocument(BsonDocument document) : base(document, "cargo", "1.0") { }
 }

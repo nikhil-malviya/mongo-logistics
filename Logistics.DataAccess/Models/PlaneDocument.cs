@@ -85,49 +85,5 @@ public class PlaneDocument : BaseDocument
 
 	#endregion Statistics
 
-	public DateTime? CreatedAt
-	{
-		get => Document.GetValueAsDateTime(Plane.CreatedAt);
-		set => Document.Set(Plane.CreatedAt, value);
-	}
-
-	public DateTime? UpdatedAt
-	{
-		get => Document.GetValueAsDateTime(Plane.UpdatedAt);
-		set => Document.Set(Plane.UpdatedAt, value);
-	}
-
-	#region Metadata
-
-	public string SchemaType
-	{
-		get => Document.GetValueAsString(Plane.SchemaType);
-		set => Document.Set(Plane.SchemaType, value);
-	}
-
-	public string SchemaVersion
-	{
-		get => Document.GetValueAsString(Plane.SchemaVersion);
-		set => Document.Set(Plane.SchemaVersion, value);
-	}
-
-	#endregion Metadata
-
-	public BsonValue Get(string field)
-	{
-		return Document.GetValue(field);
-	}
-
-	public void Set(string field, BsonValue value)
-	{
-		Document.Set(field, value);
-	}
-
-	private readonly BsonDocument _document;
-	public BsonDocument Document => _document;
-
-	public PlaneDocument(BsonDocument document) : base(document, "plane", "1.0")
-	{
-		_document = document;
-	}
+	public PlaneDocument(BsonDocument document) : base(document, "plane", "1.0") { }
 }
