@@ -15,7 +15,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			return document.GetValue(field).AsObjectId;
+			return document.TryGetValue(field).AsObjectId;
 		}
 		catch (KeyNotFoundException)
 		{
@@ -33,7 +33,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			return document.GetValue(field).AsString;
+			return document.TryGetValue(field).AsString;
 		}
 		catch (KeyNotFoundException)
 		{
@@ -51,7 +51,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			var array = document.GetValue(field).AsBsonArray;
+			var array = document.TryGetValue(field).AsBsonArray;
 			return array.Select(ele => ele.AsString).ToArray();
 		}
 		catch (KeyNotFoundException)
@@ -70,7 +70,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			return document.GetValue(field).AsDouble;
+			return document.TryGetValue(field).AsDouble;
 		}
 		catch (KeyNotFoundException)
 		{
@@ -88,7 +88,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			return document.GetValue(field).ToUniversalTime();
+			return document.TryGetValue(field).ToUniversalTime();
 		}
 		catch (KeyNotFoundException)
 		{
@@ -106,7 +106,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			return document.GetValue(field).AsBoolean;
+			return document.TryGetValue(field).AsBoolean;
 		}
 		catch (KeyNotFoundException)
 		{
@@ -161,7 +161,7 @@ public static class BsonValueExtensions
 	{
 		try
 		{
-			var coordinates = document.GetValue(field).AsBsonArray;
+			var coordinates = document.TryGetValue(field).AsBsonArray;
 			var longitude = coordinates[0].AsDouble;
 			var latitude = coordinates[1].AsDouble;
 			return new GeoJson2DGeographicCoordinates(latitude: latitude, longitude: longitude);
@@ -189,4 +189,32 @@ public static class BsonValueExtensions
 	}
 
 	#endregion Coordinates
+
+	// Parse field names with dot notation
+	public static BsonValue TryGetValue(this BsonDocument document, string field)
+	{
+		var segments = field.Split('.', StringSplitOptions.RemoveEmptyEntries);
+		if (segments.Length == 1)
+		{
+			return document.GetValue(field);
+		}
+		else
+		{
+			var current = document;
+			for (int i = 0; i < segments.Length; i++)
+			{
+				var segment = segments[i];
+				if (i == segments.Length - 1)
+				{
+					return current.GetValue(segment);
+				}
+				else
+				{
+					current = current.GetValue(segment).AsBsonDocument;
+				}
+			}
+
+			return current;
+		}
+	}
 }
