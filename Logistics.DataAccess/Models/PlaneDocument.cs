@@ -86,4 +86,6 @@ public class PlaneDocument : BaseDocument
 	#endregion Statistics
 
 	public PlaneDocument(BsonDocument document) : base(document, "plane", "1.0") { }
+
+	public PlaneDocument() : base("plane", "1.0") { }
 }

@@ -34,4 +34,6 @@ public class CityDocument : BaseDocument
 	}
 
 	public CityDocument(BsonDocument document) : base(document, "city", "1.0") { }
+
+	public CityDocument() : base("city", "1.0") { }
 }

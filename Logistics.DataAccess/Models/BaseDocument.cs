@@ -60,4 +60,6 @@ public class BaseDocument
 			});
 		}
 	}
+
+	public BaseDocument(string schemaType, string schemaVersion) : this(new BsonDocument(), schemaType, schemaVersion) { }
 }

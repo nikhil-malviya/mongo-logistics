@@ -51,4 +51,6 @@ public class CargoDocument : BaseDocument
 	}
 
 	public CargoDocument(BsonDocument document) : base(document, "cargo", "1.0") { }
+
+	public CargoDocument() : base("cargo", "1.0") { }
 }

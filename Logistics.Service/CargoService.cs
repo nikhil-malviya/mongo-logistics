@@ -43,7 +43,7 @@ public class CargoService : ICargoService
 	{
 		try
 		{
-			var cargo = new CargoDocument(new BsonDocument())
+			var cargo = new CargoDocument
 			{
 				Received = DateTime.UtcNow,
 				Location = location,

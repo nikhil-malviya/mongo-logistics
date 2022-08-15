@@ -156,14 +156,6 @@ public class PlaneService : IPlaneService
 			var routeOnly = Builders<BsonDocument>.Projection.Include(Plane.Route);
 			var document = await Query.FindOneAsync(_collection, filter, routeOnly).ConfigureAwait(false);
 
-			var plane = new PlaneDocument(document);
-			var previouslyLanded = string.Empty;
-
-			if (plane.Route.Length > 0)
-			{
-				previouslyLanded = plane.Route.First();
-			}
-
 			// Remove first route from route list and set it as departed city
 			var update = Builders<BsonDocument>.Update
 					.PopFirst(Plane.Route);

@@ -9,7 +9,7 @@ namespace Logistics.DataAccess.MongoDB;
 
 public static class ChangeStream
 {
-	private static readonly string _prefix = "statistics";
+	private const string Statistics = "statistics";
 	private static object locker = new object();
 
 	public static async Task Monitor(IMongoClient client, IConfiguration configuration)
@@ -36,18 +36,18 @@ public static class ChangeStream
 				{
 					var plane = new PlaneDocument(change.FullDocument);
 
-					string departedCity = plane.Departed;
-					string landedCity = plane.Landed;
-
-					if (!string.IsNullOrWhiteSpace(departedCity) && !string.IsNullOrWhiteSpace(landedCity))
+					if (!string.IsNullOrWhiteSpace(plane.Departed) && !string.IsNullOrWhiteSpace(plane.Landed))
 					{
-						var travelledCitiesNames = new string[] { departedCity, landedCity };
-						var filter = Builders<BsonDocument>.Filter.In(City.Id, travelledCitiesNames);
+						var cityFilter = Builders<BsonDocument>.Filter.In(City.Id, new string[] { plane.Departed, plane.Landed });
 
-						var travelledCities = citiesCollection.Find(filter).ToList();
+						var travelledCities = citiesCollection.Find(cityFilter).ToList();
 
-						plane.Departed = plane.Landed;
-						UpdatePlaneStatistics(plane, travelledCities);
+						var planeFilter = Builders<BsonDocument>.Filter.Eq(Plane.Id, plane.Id);
+						var update = Builders<BsonDocument>.Update
+													.Set(Plane.Departed, plane.Landed)
+													.Set(Statistics, GetPlaneStatistics(plane, travelledCities));
+
+						planesCollection.UpdateOne(planeFilter, update);
 					}
 				});
 			}
@@ -58,13 +58,14 @@ public static class ChangeStream
 		}
 	}
 
-	public static void UpdatePlaneStatistics(PlaneDocument plane, List<BsonDocument> travelledCities)
+
+	public static BsonDocument GetPlaneStatistics(PlaneDocument plane, List<BsonDocument> travelledCities)
 	{
 		lock (locker)
 		{
 			if (travelledCities.Count != 2)
 			{
-				return;
+				return new BsonDocument();
 			}
 
 			var city1Location = travelledCities[0].GetValueAsCoordinates(City.Position);
@@ -88,14 +89,13 @@ public static class ChangeStream
 				maintenanceRequired = distanceTravelledSinceLastMaintenance > 50000;
 			}
 
-			plane.Document.Set(_prefix, new BsonDocument
-				{
-					{ Plane.DistanceTravelledSinceLastMaintenanceInMiles.TrimPrefix(), distanceTravelledSinceLastMaintenance },
-					{ Plane.MaintenanceRequired.TrimPrefix(), maintenanceRequired },
-					{ Plane.TotalDistanceTravelledInMiles.TrimPrefix(), plane.TotalDistanceTravelledInMiles + travelledDistance},
-					{ Plane.AirtimeInMinutes.TrimPrefix(), plane.AirtimeInMinutes + timeTaken}
-				}
-			);
+			return new BsonDocument
+			{
+				{ Plane.DistanceTravelledSinceLastMaintenanceInMiles.TrimPrefix(), distanceTravelledSinceLastMaintenance },
+				{ Plane.MaintenanceRequired.TrimPrefix(), maintenanceRequired },
+				{ Plane.TotalDistanceTravelledInMiles.TrimPrefix(), plane.TotalDistanceTravelledInMiles + travelledDistance},
+				{ Plane.AirtimeInMinutes.TrimPrefix(), plane.AirtimeInMinutes + timeTaken}
+			};
 		}
 	}
 
@@ -120,6 +120,6 @@ public static class ChangeStream
 
 	private static string TrimPrefix(this string field)
 	{
-		return field.Replace($"{_prefix}.", string.Empty);
+		return field.Replace($"{Statistics}.", string.Empty);
 	}
 }
